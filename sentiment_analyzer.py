@@ -165,10 +165,10 @@ class SentimentAnalyzer:
             term_type: str. Word or noun phrase, e.g., 'w' or 'np'
 
             kwargs:
-                topk: list.
+                topk: list. Top-k word counts
 
         Returns:
-            A DataFrame with co-occurrences of terms
+            A DataFrame with term co-occurrences
         """
 
         topk = kwargs.get('topk', self.get_topk_terms(k, label, term_type))
@@ -194,8 +194,8 @@ class SentimentAnalyzer:
             term_type: str. Word or noun phrase, e.g., 'w' or 'np'
 
             kwargs:
-                topk:       list. A list of top-k word counts
-                coocurr_df: DataFrame.
+                topk:       list. Top-k word counts
+                coocurr_df: DataFrame. Term co-occurrences
 
         Returns:
             mi_df: A DataFrame that contains MI score for each term
@@ -226,8 +226,8 @@ class SentimentAnalyzer:
             term_type: str. Word or noun phrase, e.g., 'w' or 'np'
 
             kwargs:
-                topk:       list. A list of top-k word counts
-                coocurr_df: DataFrame.
+                topk:       list. Top-k word counts
+                coocurr_df: DataFrame. Term co-occurrences
 
         Returns:
             pmi_df: A DataFrame that contains PMI score for each term
@@ -238,17 +238,24 @@ class SentimentAnalyzer:
         topk_terms = [term for term, _ in topk]
 
         coocurr_df = kwargs.get('coocurr', self.get_coocurr(k, label, term_type, topk=topk))
-        num = coocurr_df.shape[0]
+
+        # Total number of reviews
+        num_reviews = self.df.shape[0]
+        # Total number of input labels
+        is_label = self.df[self.truth_col] == label
+        py = pd.Series(is_label).sum()
+
         pmi = []
-        epsilon = 1e-4
         for term in topk_terms:
+            # Total number of this term's occurrences
             px = coocurr_df[term].sum()
-            py = coocurr_df[self.truth_col == label].sum()
-            pxy = len(coocurr_df[(coocurr_df[self.truth_col] == label) & (coocurr_df[term] == 1)])
+            # Total number of this term's occurrences as observed along with the label
+            pxy = self.df[(coocurr_df[term] == 1) & is_label].shape[0]
 
-            score = math.log2(num * (pxy + epsilon) / (px * py))
+            # log zero handler
+            pxy += 1e-4 if pxy == 0 else pxy
 
-            pmi.append([term, score])
+            pmi.append([term, math.log2(num_reviews * pxy / (px * py))])
 
         pmi_df = pd.DataFrame(pmi)
         pmi_df.columns = ['Term', 'PMI']
