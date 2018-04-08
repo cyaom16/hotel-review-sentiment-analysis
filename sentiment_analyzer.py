@@ -4,8 +4,6 @@ from nltk.corpus import stopwords
 from nltk import WordNetLemmatizer
 from nltk import RegexpParser
 from collections import Counter
-from tqdm import tqdm
-
 import sklearn.metrics as metrics
 import pandas as pd
 import math
@@ -90,12 +88,10 @@ class SentimentAnalyzer:
 
     @staticmethod
     def _leaves(tree):
-        """Finds NP (noun phrase) leaf nodes of a chunk tree."""
+        """Finds NP (noun phrase) leaf nodes of a tree chunk."""
 
-        for subtree in tree.subtrees(filter=lambda t: t.label() == 'NP' or
-                                                      t.label() == 'JJ' or
-                                                      t.label() == 'RB'):
-            yield subtree.leaves()
+        for st in tree.subtrees(filter=lambda t: t.label() in ['NP', 'JJ', 'RB']):
+            yield st.leaves()
 
     def _gen_terms(self, tree):
         """Generate a phrase one at a time"""
@@ -114,23 +110,23 @@ class SentimentAnalyzer:
 
     def tokenize(self, text, term_type='w'):
         """
-        Split text into tokens by the specified type
+        Tokenize text by the specified type
 
         Args:
             text: Input text
-            term_type: word or noun phrase
+            term_type: word or noun phrase, e.g., 'w' or 'np'
 
         Returns:
             tokens: A list of tokens
         """
 
+        words = re.findall(r'\w+', str(text))
+
         if term_type == 'w':
-            tokens = [self._normalize(word)
-                      for word in re.findall(r'\w+', str(text))
-                      if self._filter(word)]
+            tokens = [self._normalize(word) for word in words if self._filter(word)]
         elif term_type == 'np':
-            tags = self.pos_tag(re.findall(r'\w+', str(text)))
-            parsed = self.parser.parse(tags)
+            # Parsed tree based on grammar structure from POS tags
+            parsed = self.parser.parse(self.pos_tag(words))
             tokens = self._flatten([phrase for phrase in self._gen_terms(parsed)])
         else:
             raise Exception("Unknown specified term_type '{}'".format(term_type))
@@ -139,18 +135,19 @@ class SentimentAnalyzer:
 
     def get_topk_terms(self, k, label_val, term_type='w'):
         """
-        Retrieve top-k terms, e.g., words or noun phrases.
+        Retrieve top-k terms (e.g., words or noun phrases).
 
         Args:
             k:         Top-k
             label_val: Either 'Positive' or 'Negative'
-            term_type: Either 'w' or 'np' as word or noun-phrase
+            term_type: word or noun phrase, e.g., 'w' or 'np'
 
         Returns:
             Top-k frequent terms (A list of tuples)
         """
 
         counter = Counter()
+        # Retrieve reviews labeled by the specified label_val
         label_reviews = self.df.loc[self.df[self.truth_col] == label_val][self.review_col]
         for review in label_reviews:
             terms = self.tokenize(review, term_type=term_type)
@@ -164,20 +161,19 @@ class SentimentAnalyzer:
 
         Args:
             k:         Top-k
-            label_val: Either 'Positive' or 'Negative'
-            term_type: Either 'w' or 'np' as word or noun-phrase
-            topk:      Top-k terms
+            label_val: 'Positive' or 'Negative'
+            term_type: word or noun phrase, e.g., 'w' or 'np'
 
         Returns:
             A DataFrame with co-occurrences of terms
         """
 
-        topk = kwargs.get('topk', self.get_topk_terms(k, label_val, term_type=term_type))
+        topk = kwargs.get('topk', self.get_topk_terms(k, label_val, term_type))
         topk_terms = [term for term, _ in topk]
 
         coocurr = []
         for review in self.df[self.review_col]:
-            counter = Counter(self.tokenize(review, term_type=term_type))
+            counter = Counter(self.tokenize(review, term_type))
             coocurr.append([1 if counter[term] else 0 for term in topk_terms])
 
         coocurr_df = pd.DataFrame(coocurr)
@@ -187,23 +183,21 @@ class SentimentAnalyzer:
 
     def get_mi(self, k, label_val, term_type='w', **kwargs):
         """
-        Calculate mutual information score
+        Calculate mutual information score for each term
 
         Args:
-            k:          Top-k
-            label_val:  Either 'Positive' or 'Negative'
-            term_type:  Either 'w' or 'np' as word or noun-phrase
-            topk:       Top-k terms
-            coocurr_df: Co-occurrence DataFrame
+            k:         Top-k
+            label_val: Either 'Positive' or 'Negative'
+            term_type: word or noun phrase, e.g., 'w' or 'np'
 
         Returns:
             mi_df: A DataFrame that contains mutual information score for each term
         """
 
-        topk = kwargs.get('topk', self.get_topk_terms(k, label_val, term_type=term_type))
+        topk = kwargs.get('topk', self.get_topk_terms(k, label_val, term_type))
         topk_terms = [term for term, _ in topk]
 
-        coocurr_df = kwargs.get('coocurr', self.get_coocurr(k, label_val, term_type='w', topk=topk))
+        coocurr_df = kwargs.get('coocurr', self.get_coocurr(k, label_val, term_type, topk=topk))
 
         labels_true = self.df[self.truth_col]
         mi_scores = [metrics.mutual_info_score(labels_true, coocurr_df[term]) for term in topk_terms]
@@ -212,5 +206,18 @@ class SentimentAnalyzer:
 
         return mi_df
 
+    def get_pmi(self):
+        """
+        Calculate point-wise mutual information score for each term
 
+        Args:
+
+        :return:
+        """
+        # df = dff.copy()
+        # df['f_x'] = df.groupby(x)[x].transform('count')
+        # df['f_y'] = df.groupby(y)[y].transform('count')
+        # df['f_xy'] = df.groupby([x, y])[x].transform('count')
+        # df['pmi'] = math.log(len(df.index) * df['f_xy'] / (df['f_x'] * df['f_y']))
+        # return df
 
