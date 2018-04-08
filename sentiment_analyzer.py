@@ -19,13 +19,13 @@ class SentimentAnalyzer:
         review_col: Column corresponding to the reviews
         truth_col:  Column corresponding to the ground truth
         copy:       Copy flag
-        analyzer:   Function to output sentiment score
-        stop_words: Stop word collections
-        pos_tag:    Part-of-speech tagger
-        parser:     Regex parser to parse a chunk tree
-        lemmatizer: Lemmatizer to apply lemmatization
-
+        analyzer:   Sentiment scorer, default NLTK Vader
+        stop_words: Stop word collections, default NLTK stopwords
+        pos_tag:    Part-of-speech tagger, default NLTK PerceptronTagger
+        parse:      Parser for a chunk tree, default NLTK Regex parser
+        lemmatize:  Lemmatizer, default NLTK WordNetLemmatizer
     """
+
     # Default grammar to parse tree
     grammar = r"""
         NBAR:
@@ -42,10 +42,10 @@ class SentimentAnalyzer:
                  truth_col,
                  copy=True,
                  analyzer=None,
-                 stop_words=None,
-                 pos_tag=None,
-                 parser=None,
-                 lemmatizer=None):
+                 stop_words=stopwords.words('english'),
+                 pos_tag=PerceptronTagger().tag,
+                 parse=RegexpParser(grammar).parse,
+                 lemmatize=WordNetLemmatizer().lemmatize):
 
         # DataFrame stuffs
         self.df = df.copy() if copy else df
@@ -54,10 +54,10 @@ class SentimentAnalyzer:
 
         # NLP stuffs
         self.analyzer = self.vader if analyzer is None else analyzer
-        self.stop_words = stopwords.words('english') if stop_words is None else stop_words
-        self.pos_tag = PerceptronTagger().tag if pos_tag is None else pos_tag
-        self.parser = RegexpParser(self.grammar) if parser is None else parser
-        self.lemmatizer = WordNetLemmatizer if lemmatizer is None else lemmatizer
+        self.stop_words = stop_words
+        self.pos_tag = pos_tag
+        self.parse = parse
+        self.lemmatize = lemmatize
 
     @staticmethod
     def vader(x):
@@ -71,31 +71,26 @@ class SentimentAnalyzer:
         Returns:
             A DataFrame that contains a column of sentiment scores
         """
-
         self.df['Score'] = self.df[self.review_col].apply(self.analyzer)
 
         return self.df
 
     def _filter(self, word):
         """Checks conditions for acceptable word: length, stopword."""
-
         return bool(2 <= len(word) <= 40 and word.lower() not in self.stop_words)
 
     def _normalize(self, word):
         """Normalises words to lowercase and lemmatizes it."""
-
-        return self.lemmatizer.lemmatize(word.lower())
+        return self.lemmatize(word.lower())
 
     @staticmethod
     def _leaves(tree):
         """Finds NP (noun phrase) leaf nodes of a tree chunk."""
-
         for st in tree.subtrees(filter=lambda t: t.label() in ['NP', 'JJ', 'RB']):
             yield st.leaves()
 
     def _gen_terms(self, tree):
         """Generate a phrase one at a time"""
-
         for leaf in self._leaves(tree):
             terms = [self._normalize(w) for w, _ in leaf if self._filter(w)]
             # Phrase only
@@ -105,7 +100,6 @@ class SentimentAnalyzer:
     @staticmethod
     def _flatten(phrases):
         """Flatten phrase lists to get tokens for analysis"""
-
         return [' '.join(phrase) for phrase in phrases]
 
     def tokenize(self, text, term_type='w'):
@@ -119,14 +113,13 @@ class SentimentAnalyzer:
         Returns:
             tokens: A list of tokens
         """
-
         words = re.findall(r'\w+', str(text))
 
         if term_type == 'w':
             tokens = [self._normalize(word) for word in words if self._filter(word)]
         elif term_type == 'np':
             # Parsed tree based on grammar structure from POS tags
-            parsed = self.parser.parse(self.pos_tag(words))
+            parsed = self.parse(self.pos_tag(words))
             tokens = self._flatten([phrase for phrase in self._gen_terms(parsed)])
         else:
             raise Exception("Unknown specified term_type '{}'".format(term_type))
@@ -145,10 +138,9 @@ class SentimentAnalyzer:
         Returns:
             Top-k frequent terms (A list of tuples)
         """
-
         counter = Counter()
-        # Retrieve reviews labeled by the specified label_val
-        label_reviews = self.df.loc[self.df[self.truth_col] == label][self.review_col]
+        # Retrieve reviews with the input label
+        label_reviews = self.df[self.df[self.truth_col] == label][self.review_col]
         for review in label_reviews:
             terms = self.tokenize(review, term_type)
             counter.update(terms)
@@ -190,7 +182,7 @@ class SentimentAnalyzer:
 
         Args:
             k:         int. Top-k
-            label:     str. Label, e.g., 'positive' or 'Negative'
+            label:     str. Label, e.g., 'positive' or 'negative'
             term_type: str. Word or noun phrase, e.g., 'w' or 'np'
 
             kwargs:
@@ -222,7 +214,7 @@ class SentimentAnalyzer:
 
         Args:
             k:         int. Top-k
-            label:     str. Label, e.g., 'positive' or 'Negative'
+            label:     str. Label, e.g., 'positive' or 'negative'
             term_type: str. Word or noun phrase, e.g., 'w' or 'np'
 
             kwargs:
